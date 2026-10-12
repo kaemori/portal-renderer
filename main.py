@@ -38,6 +38,65 @@ class PortalCouple:
     portal_b: Object3D
 
 
+class Camera:
+    def __init__(self, position, rotation):
+        self.position = position
+        self.rotation = rotation
+        self.velocity = [0, 0, 0]
+
+        self.forward, self.right, self.up = self.get_axis(rotation)
+
+        self.last_mouse_x, self.last_mouse_y = mouse.get_position()
+
+    @staticmethod
+    def get_axis(rotation):
+        sinrot_x = sin(rotation[1])
+        sinrot_y = sin(rotation[0])
+        cosrot_x = cos(rotation[1])
+        cosrot_y = cos(rotation[0])
+
+        forward = (
+            sinrot_x * cosrot_y,
+            cosrot_x * cosrot_y,
+            sinrot_y,
+        )
+        right = (cosrot_x, -sinrot_x, 0)
+        up = (
+            sinrot_x * sinrot_y,
+            cosrot_x * sinrot_y,
+            -cosrot_y,
+        )
+
+        return forward, right, up
+
+    def update(self):
+        mouse_x, mouse_y = mouse.get_position()
+        self.rotation[0] += (mouse_y - self.last_mouse_y) * 0.01
+        self.rotation[1] += (mouse_x - self.last_mouse_x) * 0.01
+        self.last_mouse_x, self.last_mouse_y = mouse.get_position()
+
+        self.forward, self.right, self.up = self.get_axis(self.rotation)
+
+        # calculate movement
+        kb_camera_movement = [
+            keyboard.is_pressed("d") - keyboard.is_pressed("a"),
+            keyboard.is_pressed("w") - keyboard.is_pressed("s"),
+            keyboard.is_pressed("ctrl") - keyboard.is_pressed("space"),
+        ]
+
+        for i in range(3):
+            self.velocity[i] += kb_camera_movement[i] * 0.42
+            self.velocity[i] *= 0.85
+
+        # move + strafe
+        sinrot_x = sin(self.rotation[1])
+        cosrot_x = cos(self.rotation[1])
+        self.position[0] += sinrot_x * self.velocity[1] + cosrot_x * self.velocity[0]
+        self.position[1] += cosrot_x * self.velocity[1] - sinrot_x * self.velocity[0]
+
+        self.position[2] += self.velocity[2]
+
+
 def transform_point(point, cam_pos, cam_right, cam_up, cam_forward):
     point_x, point_y, point_z = point
     cam_x, cam_y, cam_z = cam_pos
@@ -54,6 +113,8 @@ def transform_point(point, cam_pos, cam_right, cam_up, cam_forward):
 
     return (cx, cy, cz)
 
+
+camera = Camera(position=[5, -50, 0], rotation=[0, 0])
 
 camera_position = [5, -50, 0]  # x left-right, y forwards-backwards, z up-down,
 camera_rotation = [0, 0]  # pitch yaw
@@ -128,55 +189,15 @@ turtle.tracer(0)
 while True:
     start_time = time.monotonic()
     turtle.clear()
+    camera.update()
 
-    # look
-    mouse_x, mouse_y = mouse.get_position()
-    camera_rotation[0] += (mouse_y - last_mouse_y) * 0.01
-    camera_rotation[1] += (mouse_x - last_mouse_x) * 0.01
-    last_mouse_x, last_mouse_y = mouse.get_position()
-
-    # calculate camera axis
-    sinrot_x = sin(camera_rotation[1])
-    sinrot_y = sin(camera_rotation[0])
-    cosrot_x = cos(camera_rotation[1])
-    cosrot_y = cos(camera_rotation[0])
-
-    camera_forward = (
-        sinrot_x * cosrot_y,
-        cosrot_x * cosrot_y,
-        sinrot_y,
-    )
-    camera_right = (cosrot_x, -sinrot_x, 0)
-    camera_up = (
-        sinrot_x * sinrot_y,
-        cosrot_x * sinrot_y,
-        -cosrot_y,
-    )
-
-    # calculate movement
-    camera_movement = [
-        keyboard.is_pressed("d") - keyboard.is_pressed("a"),
-        keyboard.is_pressed("w") - keyboard.is_pressed("s"),
-        keyboard.is_pressed("ctrl") - keyboard.is_pressed("space"),
-    ]
-
-    for i in range(3):
-        camera_velocity[i] += camera_movement[i] * 0.42
-        camera_velocity[i] *= 0.85
-
-    # move + strafe
-    camera_position[0] += sinrot_x * camera_velocity[1] + cosrot_x * camera_velocity[0]
-    camera_position[1] += cosrot_x * camera_velocity[1] - sinrot_x * camera_velocity[0]
-
-    camera_position[2] += camera_velocity[2]
-
-    # Transform and collect every visible face before drawing any of them.
+    # transform and collect every visible face before drawing any of them.
     faces_to_draw = []
     for shape in scene:
         transformed_vertexes = [[] * 3 for _ in range(len(shape["vertexes"]))]
         for i, vertex in enumerate(shape["vertexes"]):
             transformed_vertexes[i] = transform_point(
-                vertex, camera_position, camera_right, camera_up, camera_forward
+                vertex, camera.position, camera.right, camera.up, camera.forward
             )
 
         for i, face in enumerate(shape["faces"]):
