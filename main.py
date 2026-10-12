@@ -44,6 +44,58 @@ def dot(a, b):
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
+def _is_inside(self, p1, p2, q):
+    R = (p2[0] - p1[0]) * (q[1] - p1[1]) - (p2[1] - p1[1]) * (q[0] - p1[0])
+    if R <= 0:
+        return True
+    else:
+        return False
+
+
+def _compute_intersection(self, p1, p2, p3, p4):
+    if p2[0] - p1[0] == 0:
+        x = p1[0]
+        m2 = (p4[1] - p3[1]) / (p4[0] - p3[0])
+        b2 = p3[1] - m2 * p3[0]
+        y = m2 * x + b2
+    elif p4[0] - p3[0] == 0:
+        x = p3[0]
+        m1 = (p2[1] - p1[1]) / (p2[0] - p1[0])
+        b1 = p1[1] - m1 * p1[0]
+        y = m1 * x + b1
+    else:
+        m1 = (p2[1] - p1[1]) / (p2[0] - p1[0])
+        b1 = p1[1] - m1 * p1[0]
+        m2 = (p4[1] - p3[1]) / (p4[0] - p3[0])
+        b2 = p3[1] - m2 * p3[0]
+        x = (b2 - b1) / (m1 - m2)
+        y = m1 * x + b1
+
+    return (x, y)
+
+
+def clip_polygon(target, clipper):
+    # sutherland-hodgman
+    final_polygon = target.copy()
+    for i in range(len(clipper)):
+        input_polygon = final_polygon.copy()
+        final_polygon = []
+        p1 = clipper[i]
+        p2 = clipper[(i + 1) % len(clipper)]
+        for j in range(len(input_polygon)):
+            q1 = input_polygon[j]
+            q2 = input_polygon[(j + 1) % len(input_polygon)]
+            if _is_inside(p1, p2, q2):
+                if not _is_inside(p1, p2, q1):
+                    intersection_point = _compute_intersection(p1, p2, q1, q2)
+                    final_polygon.append(intersection_point)
+                final_polygon.append(q2)
+            elif _is_inside(p1, p2, q1):
+                intersection_point = _compute_intersection(p1, p2, q1, q2)
+                final_polygon.append(intersection_point)
+    return final_polygon
+
+
 def triangulate_face(face):
     triangles = []
     for i in range(1, len(face) - 1):
