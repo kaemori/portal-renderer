@@ -2,6 +2,8 @@ import math
 import keyboard
 import mouse
 
+from dataclasses import dataclass, asdict
+
 import turtle, time
 from operator import itemgetter
 
@@ -19,6 +21,21 @@ keyboard._nixkeyboard.check_output = lambda cmd, **kwargs: (
 cos = math.cos
 sin = math.sin
 pi = math.pi
+
+
+@dataclass
+class Object3D:
+    name: str
+    fill: bool
+    outline: str
+    vertexes: list[list[float]]
+    faces: list[tuple[list[int], str]]
+
+
+@dataclass
+class PortalCouple:
+    portal_a: Object3D
+    portal_b: Object3D
 
 
 def transform_point(point, cam_pos, cam_right, cam_up, cam_forward):
@@ -44,29 +61,56 @@ camera_velocity = [0, 0, 0]
 
 last_mouse_x, last_mouse_y = mouse.get_position()
 
-scene = [
-    {
-        "name": "Cube",
-        "vertexes": [
-            [10, 10, -10],
-            [10, -10, -10],
-            [10, 10, 10],
-            [10, -10, 10],
-            [-10, 10, -10],
-            [-10, -10, -10],
-            [-10, 10, 10],
-            [-10, -10, 10],
-        ],
-        "faces": [
-            ([0, 4, 6, 2], "Material.001"),
-            ([5, 4, 0, 1], "Material.002"),
-            ([7, 6, 4, 5], "Material.003"),
-            ([3, 2, 6, 7], "Material.004"),
-            ([1, 0, 2, 3], "Material.005"),
-            ([5, 1, 3, 7], "Material.006"),
-        ],
-    }
-]
+Cube = Object3D(
+    name="Cube",
+    fill=True,
+    outline=None,
+    vertexes=[
+        [10, 10, -10],
+        [10, -10, -10],
+        [10, 10, 10],
+        [10, -10, 10],
+        [-10, 10, -10],
+        [-10, -10, -10],
+        [-10, 10, 10],
+        [-10, -10, 10],
+    ],
+    faces=[
+        ([0, 4, 6, 2], "Material.001"),
+        ([5, 4, 0, 1], "Material.002"),
+        ([7, 6, 4, 5], "Material.003"),
+        ([3, 2, 6, 7], "Material.004"),
+        ([1, 0, 2, 3], "Material.005"),
+        ([5, 1, 3, 7], "Material.006"),
+    ],
+)
+Portal1A = Object3D(
+    name="Portal 1A",
+    fill=False,
+    outline="black",
+    vertexes=[
+        [-20, 20, 20],
+        [20, 20, 20],
+        [20, -20, 20],
+        [-20, -20, 20],
+    ][::-1],
+    faces=[([0, 3, 2, 1], None)],
+)
+Portal1B = Object3D(
+    name="Portal 1B",
+    fill=False,
+    outline="orange",
+    vertexes=[
+        [-20, 20, 20],
+        [20, 20, 20],
+        [20, -20, 20],
+        [-20, -20, 20],
+    ],
+    faces=[([0, 3, 2, 1], None)],
+)
+Portal1 = PortalCouple(portal_a=Portal1A, portal_b=Portal1B)
+
+scene = [asdict(Cube), asdict(Portal1A), asdict(Portal1B)]
 scene_colors = {
     "Material.001": (1, 0, 0),
     "Material.002": (0, 1, 0),
@@ -75,7 +119,6 @@ scene_colors = {
     "Material.005": (1, 0, 1),
     "Material.006": (0, 1, 1),
 }
-
 turtle.bgcolor("grey")
 turtle.penup()
 turtle.hideturtle()
@@ -94,7 +137,7 @@ while True:
 
     # calculate camera axis
     sinrot_x = sin(camera_rotation[1])
-    sinrot_y = sin(camera_rotation[0])  # honestly used more in movement
+    sinrot_y = sin(camera_rotation[0])
     cosrot_x = cos(camera_rotation[1])
     cosrot_y = cos(camera_rotation[0])
 
@@ -127,16 +170,16 @@ while True:
 
     camera_position[2] += camera_velocity[2]
 
-    # draw loop
-    for object in scene:
-        transformed_vertexes = [[] * 3 for _ in range(len(object["vertexes"]))]
-        for i, vertex in enumerate(object["vertexes"]):
+    # Transform and collect every visible face before drawing any of them.
+    faces_to_draw = []
+    for shape in scene:
+        transformed_vertexes = [[] * 3 for _ in range(len(shape["vertexes"]))]
+        for i, vertex in enumerate(shape["vertexes"]):
             transformed_vertexes[i] = transform_point(
                 vertex, camera_position, camera_right, camera_up, camera_forward
             )
 
-        sorted_faces = []
-        for i, face in enumerate(object["faces"]):
+        for i, face in enumerate(shape["faces"]):
             vertex_indexes, mtl = face
             face_tv = [transformed_vertexes[i] for i in vertex_indexes]
 
@@ -157,45 +200,46 @@ while True:
             e2x, e2y = cx - ax, cy - ay
             if e1x * e2y - e1y * e2x >= 0:
                 continue
-            # ---------------------------------------------------------
 
             cx_avg = sum(v[0] for v in face_tv) / len(vertex_indexes)
             cy_avg = sum(v[1] for v in face_tv) / len(vertex_indexes)
             cz_avg = sum(v[2] for v in face_tv) / len(vertex_indexes)
             distance = cx_avg**2 + cy_avg**2 + cz_avg**2
-            sorted_faces.append((face_tv, mtl, distance))
+            faces_to_draw.append((face_tv, mtl, distance, shape))
 
-        sorted_faces.sort(key=itemgetter(2), reverse=True)
+    faces_to_draw.sort(key=itemgetter(2), reverse=True)
 
-        for face in sorted_faces:
-            vertexes, mtl, _ = face
-            projected_points = []
-
-            # draw
-            for i, transformed in enumerate(vertexes):
-                cz = transformed[2]
-                if cz <= 0:
-                    break
-                screen_x = (transformed[0] / cz) * 300
-                screen_y = (transformed[1] / cz) * 300
-                projected_points.append((screen_x, screen_y))
-            else:
-                color = scene_colors.get(mtl, (1, 1, 1))
-                turtle.fillcolor(color)
+    for vertexes, mtl, _, shape in faces_to_draw:
+        projected_points = []
+        for transformed in vertexes:
+            cz = transformed[2]
+            if cz <= 0:
+                break
+            screen_x = (transformed[0] / cz) * 300
+            screen_y = (transformed[1] / cz) * 300
+            projected_points.append((screen_x, screen_y))
+        else:
+            fill_color = scene_colors.get(mtl, (1, 1, 1))
+            outline_color = shape["outline"]
+            turtle.penup()
+            turtle.goto(projected_points[-1])
+            if shape["fill"]:
+                turtle.fillcolor(fill_color)
+                turtle.pencolor(fill_color if outline_color is None else outline_color)
                 turtle.begin_fill()
-                turtle.goto(projected_points[-1])
-                for p in projected_points:
-                    turtle.goto(p)
+            elif outline_color is not None:
+                turtle.pencolor(outline_color)
+
+            turtle.pendown()
+            for p in projected_points:
+                turtle.goto(p)
+            turtle.goto(projected_points[0])
+
+            if shape["fill"]:
                 turtle.end_fill()
+            turtle.penup()
 
     turtle.update()
-    # print(1 / (time.monotonic() - start_time), end=" ")
-
-    # limit framerate
-    if time.monotonic() - start_time > (1 / 60):
-        # print("slow")
-        continue
 
     while (time.monotonic() - start_time) <= (1 / 60):
         pass
-    # print(1 / (time.monotonic() - start_time))
