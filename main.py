@@ -37,6 +37,10 @@ class PortalCouple:
     portal_a: Object3D
     portal_b: Object3D
 
+    def __post_init__(self):
+        if len(self.portal_a.faces) != 1 or len(self.portal_b.faces) != 1:
+            raise ValueError("Portals must have exactly one face each.")
+
 
 class Camera:
     def __init__(self, position, rotation):
@@ -96,25 +100,21 @@ class Camera:
 
         self.position[2] += self.velocity[2]
 
+    def transform_point(self, point):
+        point_x, point_y, point_z = point
+        cam_x, cam_y, cam_z = self.position
+        ox = point_x - cam_x
+        oy = point_y - cam_y
+        oz = point_z - cam_z
 
-def transform_point(point, cam_pos, cam_right, cam_up, cam_forward):
-    point_x, point_y, point_z = point
-    cam_x, cam_y, cam_z = cam_pos
-    ox = point_x - cam_x
-    oy = point_y - cam_y
-    oz = point_z - cam_z
+        cx = ox * self.right[0] + oy * self.right[1] + oz * self.right[2]
+        cy = ox * self.up[0] + oy * self.up[1] + oz * self.up[2]
+        cz = ox * self.forward[0] + oy * self.forward[1] + oz * self.forward[2]
 
-    cam_right_x, cam_right_y, cam_right_z = cam_right
-    cam_up_x, cam_up_y, cam_up_z = cam_up
-    cam_forward_x, cam_forward_y, cam_forward_z = cam_forward
-    cx = ox * cam_right_x + oy * cam_right_y + oz * cam_right_z
-    cy = ox * cam_up_x + oy * cam_up_y + oz * cam_up_z
-    cz = ox * cam_forward_x + oy * cam_forward_y + oz * cam_forward_z
-
-    return (cx, cy, cz)
+        return (cx, cy, cz)
 
 
-camera = Camera(position=[5, -50, 0], rotation=[0, 0])
+main_camera = Camera(position=[5, -50, 0], rotation=[0, 0])
 
 camera_position = [5, -50, 0]  # x left-right, y forwards-backwards, z up-down,
 camera_rotation = [0, 0]  # pitch yaw
@@ -148,7 +148,7 @@ Cube = Object3D(
 Portal1A = Object3D(
     name="Portal 1A",
     fill=False,
-    outline="black",
+    outline="red",
     vertexes=[
         [-20, 20, 20],
         [20, 20, 20],
@@ -160,7 +160,7 @@ Portal1A = Object3D(
 Portal1B = Object3D(
     name="Portal 1B",
     fill=False,
-    outline="orange",
+    outline="blue",
     vertexes=[
         [-20, 20, 20],
         [20, 20, 20],
@@ -185,20 +185,19 @@ turtle.penup()
 turtle.hideturtle()
 turtle.speed(0)
 turtle.tracer(0)
+turtle.pensize(1)
 
 while True:
     start_time = time.monotonic()
     turtle.clear()
-    camera.update()
+    main_camera.update()
 
     # transform and collect every visible face before drawing any of them.
     faces_to_draw = []
     for shape in scene:
         transformed_vertexes = [[] * 3 for _ in range(len(shape["vertexes"]))]
         for i, vertex in enumerate(shape["vertexes"]):
-            transformed_vertexes[i] = transform_point(
-                vertex, camera.position, camera.right, camera.up, camera.forward
-            )
+            transformed_vertexes[i] = main_camera.transform_point(vertex)
 
         for i, face in enumerate(shape["faces"]):
             vertex_indexes, mtl = face
