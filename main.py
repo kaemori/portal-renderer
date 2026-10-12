@@ -16,74 +16,9 @@ keyboard._nixkeyboard.check_output = lambda cmd, **kwargs: (
     else check_output(cmd, **kwargs)
 )
 
-turtle.penup()
-turtle.hideturtle()
-turtle.speed(0)
-turtle.tracer(0)
-
 cos = math.cos
 sin = math.sin
 pi = math.pi
-
-
-def load_objs(file_path, scale=1):
-    with open(file_path) as file:
-        lines = file.readlines()
-
-    recording = False
-    objects = []
-    vertexes = []
-    faces = []
-    curr_mtl = None
-
-    for line in lines:
-        parts = line.strip().split()
-        if not parts:
-            continue
-        command, *args = parts
-
-        if command == "o":
-            name = args[0]
-            if recording:  # add current object, reset
-                objects.append({"name": name, "vertexes": vertexes, "faces": faces})
-                vertexes = []
-                faces = []
-            else:
-                recording = True
-
-        elif command == "v":
-            vertexes.append(list(map(lambda x: float(x) * scale, args)))
-        elif command == "f":
-            # objects[-1]["faces"].append(
-            #     ([vertexes[int(i.split("/")[0]) - 1] for i in args], curr_mtl)
-            # )
-            faces.append(([int(i.split("/")[0]) - 1 for i in args], curr_mtl))
-        elif command == "usemtl":
-            curr_mtl = args[0]
-
-    objects.append({"name": name, "vertexes": vertexes, "faces": faces})
-
-    # pprint(vertexes)
-    return objects
-
-
-def load_mtl(file_path):
-    with open(file_path) as file:
-        lines = file.readlines()
-
-    colors = {}
-    curr_mtl = None
-
-    for line in lines:
-        parts = line.strip().split()
-        if not parts:
-            continue
-        command, *args = parts
-        if command == "newmtl":
-            curr_mtl = args[0]
-        elif command == "Kd" and curr_mtl:
-            colors[curr_mtl] = [float(i) for i in args]
-    return colors
 
 
 def transform_point(point, cam_pos, cam_right, cam_up, cam_forward):
@@ -109,24 +44,43 @@ camera_velocity = [0, 0, 0]
 
 last_mouse_x, last_mouse_y = mouse.get_position()
 
-scene = load_objs("objs/cube.obj", 10)
-scene_colors = load_mtl("objs/cube.mtl")
+scene = [
+    {
+        "name": "Cube",
+        "vertexes": [
+            [10, 10, -10],
+            [10, -10, -10],
+            [10, 10, 10],
+            [10, -10, 10],
+            [-10, 10, -10],
+            [-10, -10, -10],
+            [-10, 10, 10],
+            [-10, -10, 10],
+        ],
+        "faces": [
+            ([0, 4, 6, 2], "Material.001"),
+            ([5, 4, 0, 1], "Material.002"),
+            ([7, 6, 4, 5], "Material.003"),
+            ([3, 2, 6, 7], "Material.004"),
+            ([1, 0, 2, 3], "Material.005"),
+            ([5, 1, 3, 7], "Material.006"),
+        ],
+    }
+]
+scene_colors = {
+    "Material.001": (1, 0, 0),
+    "Material.002": (0, 1, 0),
+    "Material.003": (0, 0, 1),
+    "Material.004": (1, 1, 0),
+    "Material.005": (1, 0, 1),
+    "Material.006": (0, 1, 1),
+}
 
-# {'faces': [([0, 4, 6, 2], 'Material.001'),
-#            ([5, 4, 0, 1], 'Material.002'),
-#            ([7, 6, 4, 5], 'Material.003'),
-#            ([3, 2, 6, 7], 'Material.004'),
-#            ([1, 0, 2, 3], 'Material.005'),
-#            ([5, 1, 3, 7], 'Material.006')],
-#  'name': 'Cube',
-#  'vertexes': [[9.9, 10.0, -10.0],
-#               [9.9, -10.0, -10.0],
-#               [9.9, 10.0, 10.0],
-#               [9.9, -10.0, 10.0],
-#               [-9.9, 10.0, -10.0],
-#               [-9.9, -10.0, -10.0],
-#               [-9.9, 10.0, 10.0],
-#               [-9.9, -10.0, 10.0]]}
+turtle.bgcolor("grey")
+turtle.penup()
+turtle.hideturtle()
+turtle.speed(0)
+turtle.tracer(0)
 
 while True:
     start_time = time.monotonic()
@@ -235,13 +189,13 @@ while True:
                 turtle.end_fill()
 
     turtle.update()
-    print(1 / (time.monotonic() - start_time), end=" ")
+    # print(1 / (time.monotonic() - start_time), end=" ")
 
     # limit framerate
     if time.monotonic() - start_time > (1 / 60):
-        print("slow")
+        # print("slow")
         continue
 
     while (time.monotonic() - start_time) <= (1 / 60):
         pass
-    print(1 / (time.monotonic() - start_time))
+    # print(1 / (time.monotonic() - start_time))
