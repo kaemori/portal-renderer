@@ -2,7 +2,7 @@ import math
 import keyboard
 import mouse
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict as _asdict
 
 import turtle, time
 from operator import itemgetter
@@ -10,17 +10,68 @@ from operator import itemgetter
 from pprint import pprint
 
 # patches keyboard.is_pressed() to work on linux
-check_output = __import__("subprocess", fromlist=["check_output"]).check_output
-keyboard._nixkeyboard.ensure_root = lambda: 0
-keyboard._nixkeyboard.check_output = lambda cmd, **kwargs: (
-    check_output(["dumpkeys", "-C", "/dev/tty1"] + cmd[1:], **kwargs)
-    if cmd[0] == "dumpkeys"
-    else check_output(cmd, **kwargs)
+_check_output = __import__("subprocess", fromlist=["check_output"]).check_output
+_kb_overload = lambda cmd, **kwargs: _check_output(
+    ["dumpkeys", "-C", "/dev/tty1", *cmd[1:]] if cmd[0] == "dumpkeys" else cmd, **kwargs
 )
+_nix_kb = getattr(keyboard, "_nixkeyboard", None)
+_nix_kb and setattr(_nix_kb, "ensure_root", lambda: 0)
+_nix_kb and setattr(_nix_kb, "check_output", _kb_overload)
+
 
 cos = math.cos
 sin = math.sin
 pi = math.pi
+
+
+# helper maths
+def asdict(*args, **kwargs):
+    """DO NOT USE DATACLASS ASDICT. INSTEAD, USE THE OBJECT'S `to_dict()` METHOD."""
+    raise NotImplementedError(
+        "Use the object's `to_dict()` method instead of dataclass's asdict() function. If absolutely necessary, asdict() is available as _asdict()."
+    )
+
+
+def cross(a, b):
+    return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+
+
+def dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def triangulate_face(face):
+    triangles = []
+    for i in range(1, len(face) - 1):
+        triangles.append((face[0], face[i], face[i + 1]))
+    return triangles
+
+
+def ray_triangle_intersection(origin, direction, triangle):
+    v0, v1, v2 = triangle
+    edge1 = [v1[i] - v0[i] for i in range(3)]
+    edge2 = [v2[i] - v0[i] for i in range(3)]
+    h = cross(direction, edge2)
+    a = dot(edge1, h)
+    if abs(a) < 1e-6:
+        return False, None
+    f = 1.0 / a
+    s = [origin[i] - v0[i] for i in range(3)]
+    u = f * dot(s, h)
+    if u < 0.0 or u > 1.0:
+        return False, None
+    q = cross(s, edge1)
+    v = f * dot(direction, q)
+    if v < 0.0 or u + v > 1.0:
+        return False, None
+    t = f * dot(edge2, q)
+    if t > 1e-6:
+        return True, (t, (1 - u - v, u, v))
+    return False, None
 
 
 @dataclass
@@ -31,15 +82,89 @@ class Object3D:
     vertexes: list[list[float]]
     faces: list[tuple[list[int], str]]
 
+    def to_dict(self):
+        return _asdict(self)
+
+
+@dataclass
+class Plane3D:
+    name: str
+    fill: bool
+    outline: str
+    vertexes: list[list[float]]
+    fill_color: tuple[float, float, float] = None
+
+    def __post_init__(self):
+        if len(self.vertexes) < 3:
+            raise ValueError("A plane must have at least 3 vertexes.")
+
+        if len(self.vertexes) > 3:
+            self._triangles = triangulate_face(self.vertexes)
+            normals = []
+            for triangle in self._triangles:
+                v0, v1, v2 = triangle
+                edge1 = [v1[i] - v0[i] for i in range(3)]
+                edge2 = [v2[i] - v0[i] for i in range(3)]
+                normal = cross(edge1, edge2)
+                length = math.sqrt(dot(normal, normal))
+                if length > 0:
+                    normal = [n / length for n in normal]
+                normals.append(normal)
+
+            one_over = [normals[(i + 1) % len(normals)] for i in range(len(normals))]
+            if any(map(lambda a, b: cross(a, b) != [0, 0, 0], *zip(normals, one_over))):
+                raise ValueError("The vertexes of the plane must be coplanar.")
+
+    def to_dict(self):
+        d = _asdict(self)
+        d["faces"] = [([i for i in range(len(self.vertexes))], None)]
+        return d
+
+
+@dataclass
+class DebugPoint3D:
+    position: list[float]
+
+    def __post_init__(self):
+        vert = (
+            [0.5, 0.5, -0.5],
+            [0.5, -0.5, -0.5],
+            [0.5, 0.5, 0.5],
+            [0.5, -0.5, 0.5],
+            [-0.5, 0.5, -0.5],
+            [-0.5, -0.5, -0.5],
+            [-0.5, 0.5, 0.5],
+            [-0.5, -0.5, 0.5],
+        )
+        faces = [
+            ([0, 4, 6, 2], "Material.001"),
+            ([5, 4, 0, 1], "Material.002"),
+            ([7, 6, 4, 5], "Material.003"),
+            ([3, 2, 6, 7], "Material.004"),
+            ([1, 0, 2, 3], "Material.005"),
+            ([5, 1, 3, 7], "Material.006"),
+        ]
+        vert = [
+            [v[0] + self.position[0], v[1] + self.position[1], v[2] + self.position[2]]
+            for v in vert
+        ]
+        faces = [(face[::-1], mtl) for face, mtl in faces]
+        self.point = Object3D(
+            name=id(self),
+            fill=True,
+            outline=None,
+            vertexes=vert,
+            faces=faces,
+        )
+
+    def to_dict(self):
+        return self.point.to_dict()
+
 
 @dataclass
 class PortalCouple:
-    portal_a: Object3D
-    portal_b: Object3D
-
-    def __post_init__(self):
-        if len(self.portal_a.faces) != 1 or len(self.portal_b.faces) != 1:
-            raise ValueError("Portals must have exactly one face each.")
+    portal_a: Plane3D
+    portal_b: Plane3D
 
 
 class Camera:
@@ -145,7 +270,7 @@ Cube = Object3D(
         ([5, 1, 3, 7], "Material.006"),
     ],
 )
-Portal1A = Object3D(
+Portal1A = Plane3D(
     name="Portal 1A",
     fill=False,
     outline="red",
@@ -155,9 +280,8 @@ Portal1A = Object3D(
         [20, -20, 20],
         [-20, -20, 20],
     ][::-1],
-    faces=[([0, 3, 2, 1], None)],
 )
-Portal1B = Object3D(
+Portal1B = Plane3D(
     name="Portal 1B",
     fill=False,
     outline="blue",
@@ -167,11 +291,15 @@ Portal1B = Object3D(
         [20, -20, 20],
         [-20, -20, 20],
     ],
-    faces=[([0, 3, 2, 1], None)],
 )
 Portal1 = PortalCouple(portal_a=Portal1A, portal_b=Portal1B)
 
-scene = [asdict(Cube), asdict(Portal1A), asdict(Portal1B)]
+scene = [
+    Cube.to_dict(),
+    Portal1A.to_dict(),
+    Portal1B.to_dict(),
+    DebugPoint3D(position=[0, 0, 20]).to_dict(),
+]
 scene_colors = {
     "Material.001": (1, 0, 0),
     "Material.002": (0, 1, 0),
