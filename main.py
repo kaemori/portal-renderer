@@ -171,7 +171,9 @@ class Object3D:
     faces: list[tuple[list[int], str]]
 
     def to_dict(self):
-        return _asdict(self)
+        d = _asdict(self)
+        d["type"] = "Object3D"
+        return d
 
 
 @dataclass
@@ -206,6 +208,7 @@ class Plane3D:
     def to_dict(self):
         d = _asdict(self)
         d["faces"] = [([i for i in range(len(self.vertexes))], None)]
+        d["type"] = "Plane3D"
         return d
 
 
@@ -246,32 +249,35 @@ class DebugPoint3D:
         )
 
     def to_dict(self):
-        return self.point.to_dict()
+        d = self.point.to_dict()
+        d["type"] = "DebugPoint3D"
+        return d
 
 
 @dataclass
 class PortalCouple:
+    name: str
     portal_a: Plane3D
     portal_b: Plane3D
 
     def __post_init__(self):
         triangle_a = self.portal_a._triangles[0]
         triangle_b = self.portal_b._triangles[0]
-        self.edge_a1 = [triangle_a[1][i] - triangle_a[0][i] for i in range(3)]
-        self.edge_a2 = [triangle_a[2][i] - triangle_a[0][i] for i in range(3)]
-        self.edge_b1 = [triangle_b[1][i] - triangle_b[0][i] for i in range(3)]
-        self.edge_b2 = [triangle_b[2][i] - triangle_b[0][i] for i in range(3)]
-        length_a1 = math.sqrt(dot(self.edge_a1, self.edge_a1))
-        length_a2 = math.sqrt(dot(self.edge_a2, self.edge_a2))
-        length_b1 = math.sqrt(dot(self.edge_b1, self.edge_b1))
-        length_b2 = math.sqrt(dot(self.edge_b2, self.edge_b2))
+        edge_a1 = [triangle_a[1][i] - triangle_a[0][i] for i in range(3)]
+        edge_a2 = [triangle_a[2][i] - triangle_a[0][i] for i in range(3)]
+        edge_b1 = [triangle_b[1][i] - triangle_b[0][i] for i in range(3)]
+        edge_b2 = [triangle_b[2][i] - triangle_b[0][i] for i in range(3)]
+        length_a1 = math.sqrt(dot(edge_a1, edge_a1))
+        length_a2 = math.sqrt(dot(edge_a2, edge_a2))
+        length_b1 = math.sqrt(dot(edge_b1, edge_b1))
+        length_b2 = math.sqrt(dot(edge_b2, edge_b2))
         if not (
             math.isclose(length_a1, length_b1) and math.isclose(length_a2, length_b2)
         ):
             raise ValueError("The two portals must be congruent.")
 
-        self.portal_a_normal = cross(self.edge_a1, self.edge_a2)
-        self.portal_b_normal = cross(self.edge_b1, self.edge_b2)
+        self.portal_a_normal = cross(edge_a1, edge_a2)
+        self.portal_b_normal = cross(edge_b1, edge_b2)
         self.portal_a_orig = [
             sum(v[i] for v in self.portal_a.vertexes) / len(self.portal_a.vertexes)
             for i in range(3)
@@ -296,6 +302,49 @@ class PortalCouple:
             [rotated_a[i] + self.portal_b_orig[i] for i in range(3)],
             [rotated_b[i] + self.portal_a_orig[i] for i in range(3)],
         )
+
+    def add_object_to_portal(self, obj: Object3D):
+        new_vertexes_a = []
+        new_vertexes_b = []
+        for vertex in obj.vertexes:
+            new_vertex_a, new_vertex_b = self.translate_point_through_both(vertex)
+            new_vertexes_a.append(new_vertex_a)
+            new_vertexes_b.append(new_vertex_b)
+
+        return _PortalObjects(
+            portal_a=Object3D(
+                name=self.name + "_" + obj.name + "_portal_a",
+                fill=obj.fill,
+                outline=obj.outline,
+                vertexes=new_vertexes_a,
+                faces=obj.faces,
+            ),
+            portal_b=Object3D(
+                name=self.name + "_" + obj.name + "_portal_b",
+                fill=obj.fill,
+                outline=obj.outline,
+                vertexes=new_vertexes_b,
+                faces=obj.faces,
+            ),
+            portal_couple=self,
+        )
+
+    def to_dict(self):
+        raise NotImplementedError(
+            "PortalCouple is not a renderable object. Use add_object_to_portal()."
+        )
+
+
+@dataclass
+class _PortalObjects:
+    portal_a: Object3D
+    portal_b: Object3D
+    portal_couple: PortalCouple
+
+    def to_dict(self):
+        d = _asdict(self)
+        d["type"] = "PortalObjects"
+        return d
 
 
 class Camera:
@@ -423,12 +472,14 @@ Portal1B = Plane3D(
         [-20, -20, 20],
     ],
 )
-Portal1 = PortalCouple(portal_a=Portal1A, portal_b=Portal1B)
+Portal1 = PortalCouple(name="Portal1", portal_a=Portal1A, portal_b=Portal1B)
+PortalCube = Portal1.add_object_to_portal(Cube)
 
 scene = [
     Cube.to_dict(),
     Portal1A.to_dict(),
     Portal1B.to_dict(),
+    PortalCube.to_dict(),
     DebugPoint3D(position=[0, 0, 20]).to_dict(),
 ]
 scene_colors = {
@@ -454,6 +505,7 @@ while True:
     # transform and collect every visible face before drawing any of them.
     faces_to_draw = []
     for shape in scene:
+        print(shape)
         transformed_vertexes = [[] * 3 for _ in range(len(shape["vertexes"]))]
         for i, vertex in enumerate(shape["vertexes"]):
             transformed_vertexes[i] = main_camera.transform_point(vertex)
