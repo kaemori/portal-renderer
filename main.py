@@ -504,39 +504,44 @@ while True:
 
     # transform and collect every visible face before drawing any of them.
     faces_to_draw = []
+    portals_projected = {}
     for shape in scene:
-        print(shape)
-        transformed_vertexes = [[] * 3 for _ in range(len(shape["vertexes"]))]
-        for i, vertex in enumerate(shape["vertexes"]):
-            transformed_vertexes[i] = main_camera.transform_point(vertex)
+        if shape["type"] == "PortalObjects":
+            ...
+        else:
+            transformed_vertexes = [[] * 3 for _ in range(len(shape["vertexes"]))]
+            for i, vertex in enumerate(shape["vertexes"]):
+                transformed_vertexes[i] = main_camera.transform_point(vertex)
 
-        for i, face in enumerate(shape["faces"]):
-            vertex_indexes, mtl = face
-            face_tv = [transformed_vertexes[i] for i in vertex_indexes]
+            for i, face in enumerate(shape["faces"]):
+                vertex_indexes, mtl = face
+                face_tv = [transformed_vertexes[i] for i in vertex_indexes]
 
-            projected = []
-            skip = False
-            for v in face_tv:
-                if v[2] <= 0:
-                    skip = True
-                    break
-                projected.append((v[0] / v[2], v[1] / v[2]))
-            if skip:
-                continue
+                projected = []
+                skip = False
+                for v in face_tv:
+                    if v[2] <= 0:
+                        skip = True
+                        break
+                    projected.append((v[0] / v[2], v[1] / v[2]))
+                if skip:
+                    continue
 
-            ax, ay = projected[0]
-            bx, by = projected[1]
-            cx, cy = projected[2]
-            e1x, e1y = bx - ax, by - ay
-            e2x, e2y = cx - ax, cy - ay
-            if e1x * e2y - e1y * e2x >= 0:
-                continue
+                ax, ay = projected[0]
+                bx, by = projected[1]
+                cx, cy = projected[2]
+                e1x, e1y = bx - ax, by - ay
+                e2x, e2y = cx - ax, cy - ay
+                if e1x * e2y - e1y * e2x >= 0:
+                    continue
 
-            cx_avg = sum(v[0] for v in face_tv) / len(vertex_indexes)
-            cy_avg = sum(v[1] for v in face_tv) / len(vertex_indexes)
-            cz_avg = sum(v[2] for v in face_tv) / len(vertex_indexes)
-            distance = cx_avg**2 + cy_avg**2 + cz_avg**2
-            faces_to_draw.append((face_tv, mtl, distance, shape))
+                cx_avg = sum(v[0] for v in face_tv) / len(vertex_indexes)
+                cy_avg = sum(v[1] for v in face_tv) / len(vertex_indexes)
+                cz_avg = sum(v[2] for v in face_tv) / len(vertex_indexes)
+                distance = cx_avg**2 + cy_avg**2 + cz_avg**2
+                faces_to_draw.append((face_tv, mtl, distance, shape))
+
+                if shape["type"] == "Plane3D":
 
     faces_to_draw.sort(key=itemgetter(2), reverse=True)
 
