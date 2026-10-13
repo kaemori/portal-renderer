@@ -89,35 +89,31 @@ def _is_inside(p1, p2, q):
 
 
 def _compute_intersection(a1, a2, b1, b2):
-    if a2[0] - a1[0] == 0:
-        x = a1[0]
-        m2 = (b2[1] - b1[1]) / (b2[0] - b1[0])
-        yint2 = b1[1] - m2 * b1[0]
-        y = m2 * x + yint2
-    elif b2[0] - b1[0] == 0:
-        x = b1[0]
-        m1 = (a2[1] - a1[1]) / (a2[0] - a1[0])
-        yint1 = a1[1] - m1 * a1[0]
-        y = m1 * x + yint1
-    else:
-        m1 = (a2[1] - a1[1]) / (a2[0] - a1[0])
-        yint1 = a1[1] - m1 * a1[0]
-        m2 = (b2[1] - b1[1]) / (b2[0] - b1[0])
-        yint2 = b1[1] - m2 * b1[0]
-        x = (yint2 - yint1) / (m1 - m2)
-        y = m1 * x + yint1
+    a_dx, a_dy = a2[0] - a1[0], a2[1] - a1[1]
+    b_dx, b_dy = b2[0] - b1[0], b2[1] - b1[1]
+    denominator = a_dx * b_dy - a_dy * b_dx
+    if abs(denominator) < 1e-12:
+        return b1
 
-    if abs(b2[0] - b1[0]) > abs(b2[1] - b1[1]):
-        t = (x - b1[0]) / (b2[0] - b1[0])
-    else:
-        t = (y - b1[1]) / (b2[1] - b1[1])
-
-    extra = tuple(v1 + t * (v2 - v1) for v1, v2 in zip(b1[2:], b2[2:]))
+    offset_x, offset_y = b1[0] - a1[0], b1[1] - a1[1]
+    segment_position = (offset_x * a_dy - offset_y * a_dx) / denominator
+    x = b1[0] + segment_position * b_dx
+    y = b1[1] + segment_position * b_dy
+    extra = tuple(v1 + segment_position * (v2 - v1) for v1, v2 in zip(b1[2:], b2[2:]))
     return (x, y) + extra
 
 
 def clip_polygon(target, clipper):
     # sutherland-hodgman
+    clipper = clipper.copy()
+    signed_area = sum(
+        clipper[i][0] * clipper[(i + 1) % len(clipper)][1]
+        - clipper[(i + 1) % len(clipper)][0] * clipper[i][1]
+        for i in range(len(clipper))
+    )
+    if signed_area > 0:
+        clipper.reverse()
+
     final_polygon = target.copy()
     for i in range(len(clipper)):
         input_polygon = final_polygon.copy()
@@ -463,16 +459,16 @@ Cube = Object3D(
     ],
 )
 _portal_vert = [
-    [-50, 50, 50],
-    [50, 50, 50],
-    [50, -50, 50],
-    [-50, -50, 50],
+    [-40, 40, 40],
+    [40, 40, 40],
+    [40, -40, 40],
+    [-40, -40, 40],
 ]
 Portal1A = Plane3D(
     name="Portal 1A",
     fill=False,
     outline="red",
-    vertexes=[[x + 200, y, z] for x, y, z in _portal_vert],
+    vertexes=[[x, y, z - 80] for x, y, z in _portal_vert][::-1],
 )
 Portal1B = Plane3D(
     name="Portal 1B",
@@ -504,7 +500,7 @@ turtle.tracer(0)
 turtle.pensize(1)
 
 
-def _prepare_visible_face(transformed_vertexes, face):
+def _prepare_visible_face(transformed_vertexes, face, flip_winding=False):
     vertex_indexes, mtl = face
     face_tv = [transformed_vertexes[i] for i in vertex_indexes]
     projected = []
@@ -518,7 +514,8 @@ def _prepare_visible_face(transformed_vertexes, face):
     cx, cy = projected[2]
     e1x, e1y = bx - ax, by - ay
     e2x, e2y = cx - ax, cy - ay
-    if e1x * e2y - e1y * e2x >= 0:
+    winding = e1x * e2y - e1y * e2x
+    if (not flip_winding and winding >= 0) or (flip_winding and winding <= 0):
         return None
 
     center = [sum(vertex[i] for vertex in face_tv) / len(face_tv) for i in range(3)]
@@ -526,168 +523,176 @@ def _prepare_visible_face(transformed_vertexes, face):
     return face_tv, mtl, distance
 
 
+MAX_PORTAL_RECURSION = 50
+
+
+def _portal_data(portal):
+    vertexes = portal["vertexes"]
+    edge_a = [vertexes[1][i] - vertexes[0][i] for i in range(3)]
+    edge_b = [vertexes[2][i] - vertexes[0][i] for i in range(3)]
+    return {
+        "origin": [
+            sum(vertex[i] for vertex in vertexes) / len(vertexes) for i in range(3)
+        ],
+        "normal": cross(edge_a, edge_b),
+    }
+
+
+def _transform_camera_through_portal(camera, source_portal, destination_portal):
+    source_normal = normalize(source_portal["normal"])
+
+    def reflect_normal_component(vector):
+        normal_component = dot(vector, source_normal)
+        return [vector[i] - 2 * normal_component * source_normal[i] for i in range(3)]
+
+    def transform_vector(vector):
+        return rotate_vector_from_to(
+            reflect_normal_component(vector),
+            source_portal["normal"],
+            destination_portal["normal"],
+        )
+
+    local_position = [camera.position[i] - source_portal["origin"][i] for i in range(3)]
+    rotated = transform_vector(local_position)
+
+    virtual_camera = Camera(
+        [rotated[i] + destination_portal["origin"][i] for i in range(3)],
+        list(camera.rotation),
+    )
+    virtual_camera.forward = transform_vector(list(camera.forward))
+    virtual_camera.right = transform_vector(list(camera.right))
+    virtual_camera.up = transform_vector(list(camera.up))
+    return virtual_camera
+
+
+def _project_face(camera, vertexes, face, clip=None, flip_winding=False):
+    visible_face = _prepare_visible_face(
+        [camera.transform_point(vertex) for vertex in vertexes], face, flip_winding
+    )
+    if visible_face is None:
+        return None
+    face_tv, mtl, distance = visible_face
+    projected = [(x / z, y / z) for x, y, z in face_tv]
+    if clip is not None:
+        projected = clip_polygon(projected, clip)
+    if not projected:
+        return None
+    return projected, mtl, distance
+
+
+def _render_scene(camera, recursion_depth, clip=None, distance_offset=0.0):
+    faces = []
+    visible_portals = []
+    flip_winding = recursion_depth % 2 == 1
+
+    for shape in scene:
+        if shape["type"] == "Object3D":
+            for face in shape["faces"]:
+                rendered = _project_face(
+                    camera, shape["vertexes"], face, clip, flip_winding
+                )
+                if rendered is not None:
+                    projected, mtl, distance = rendered
+                    faces.append(
+                        (
+                            projected,
+                            mtl,
+                            distance_offset + math.sqrt(distance),
+                            shape,
+                        )
+                    )
+        elif shape["type"] == "PortalCouple":
+            for source_name, destination_name in (
+                ("portal_a", "portal_b"),
+                ("portal_b", "portal_a"),
+            ):
+                source = shape[source_name]
+                destination = shape[destination_name]
+                portal_face = _project_face(
+                    camera,
+                    source["vertexes"],
+                    (range(len(source["vertexes"])), None),
+                    flip_winding=flip_winding,
+                )
+                if portal_face is None:
+                    continue
+                portal_bounds, _, distance = portal_face
+                if clip is not None:
+                    portal_bounds = clip_polygon(portal_bounds, clip)
+                if portal_bounds:
+                    faces.append(
+                        (
+                            portal_bounds,
+                            None,
+                            distance_offset + math.sqrt(distance),
+                            source,
+                        )
+                    )
+                    visible_portals.append(
+                        (source, destination, portal_bounds, math.sqrt(distance))
+                    )
+        elif shape["type"] == "Plane3D":
+            rendered = _project_face(
+                camera,
+                shape["vertexes"],
+                (range(len(shape["vertexes"])), None),
+                clip,
+                flip_winding,
+            )
+            if rendered is not None:
+                projected, mtl, distance = rendered
+                faces.append(
+                    (
+                        projected,
+                        mtl,
+                        distance_offset + math.sqrt(distance),
+                        shape,
+                    )
+                )
+
+    if recursion_depth < MAX_PORTAL_RECURSION:
+        for source, destination, portal_bounds, portal_distance in visible_portals:
+            virtual_camera = _transform_camera_through_portal(
+                camera, _portal_data(source), _portal_data(destination)
+            )
+            faces.extend(
+                _render_scene(
+                    virtual_camera,
+                    recursion_depth + 1,
+                    portal_bounds,
+                    distance_offset + portal_distance,
+                )
+            )
+    return faces
+
+
 while True:
     start_time = time.monotonic()
     turtle.clear()
     main_camera.update()
+    faces_to_draw = _render_scene(main_camera, 0)
+    faces_to_draw.sort(key=lambda face: -face[2])
 
-    faces_to_draw = []
-    portals_projected = {}
-    for shape in scene:
-        if shape["type"] == "PortalCouple":
-            portal_a_face = _prepare_visible_face(
-                [main_camera.transform_point(v) for v in shape["portal_a"]["vertexes"]],
-                [[i for i in range(len(shape["portal_a"]["vertexes"]))], None],
-            )
-            portal_b_face = _prepare_visible_face(
-                [main_camera.transform_point(v) for v in shape["portal_b"]["vertexes"]],
-                [[i for i in range(len(shape["portal_b"]["vertexes"]))], None],
-            )
-
-            same_location = set(map(tuple, shape["portal_a"]["vertexes"])) == set(
-                map(tuple, shape["portal_b"]["vertexes"])
-            )
-
-            available_portals = {}
-            if portal_a_face is not None:
-                faces_to_draw.append(
-                    (portal_a_face[0], None, portal_a_face[2], shape["portal_a"])
-                )
-                portal_a_bounding = [
-                    (ax / az, ay / az) for ax, ay, az in portal_a_face[0]
-                ]
-                available_portals["portal_a"] = portal_a_bounding
-            elif not same_location:
-                portal_a_ghost = _prepare_visible_face(
-                    [
-                        main_camera.transform_point(v)
-                        for v in shape["portal_a"]["vertexes"][::-1]
-                    ],
-                    [[i for i in range(len(shape["portal_a"]["vertexes"]))], None],
-                )
-                if portal_a_ghost is not None:
-                    portal_recolor = shape["portal_a"].copy()
-                    portal_recolor["outline"] = "darkgrey"
-                    faces_to_draw.append(
-                        (portal_a_ghost[0], None, portal_a_ghost[2], portal_recolor)
-                    )
-
-            if portal_b_face is not None:
-                faces_to_draw.append(
-                    (portal_b_face[0], None, portal_b_face[2], shape["portal_b"])
-                )
-                portal_b_bounding = [
-                    (bx / bz, by / bz) for bx, by, bz in portal_b_face[0]
-                ]
-                available_portals["portal_b"] = portal_b_bounding
-            elif not same_location:
-                portal_b_ghost = _prepare_visible_face(
-                    [
-                        main_camera.transform_point(v)
-                        for v in shape["portal_b"]["vertexes"][::-1]
-                    ],
-                    [[i for i in range(len(shape["portal_b"]["vertexes"]))], None],
-                )
-                if portal_b_ghost is not None:
-                    portal_recolor = shape["portal_b"].copy()
-                    portal_recolor["outline"] = "darkgrey"
-                    faces_to_draw.append(
-                        (portal_b_ghost[0], None, portal_b_ghost[2], portal_recolor)
-                    )
-
-            if len(available_portals) == 0:
-                continue
-
-            for object in shape["object_registry"]:
-                for portal, bounding in available_portals.items():
-                    destination_portal = (
-                        "portal_b" if portal == "portal_a" else "portal_a"
-                    )
-                    portal_obj = object[destination_portal]
-                    transformed_vertexes = [
-                        [] * 3 for _ in range(len(portal_obj["vertexes"]))
-                    ]
-                    for i, vertex in enumerate(portal_obj["vertexes"]):
-                        transformed_vertexes[i] = main_camera.transform_point(vertex)
-
-                    for i, face in enumerate(portal_obj["faces"]):
-                        visible_face = _prepare_visible_face(transformed_vertexes, face)
-                        if visible_face is not None:
-                            face_tv, mtl, distance = visible_face
-                            face_tv_projected = [
-                                (x / z, y / z, 1.0 / z) for x, y, z in face_tv
-                            ]
-                            clipped_face = clip_polygon(face_tv_projected, bounding)
-                            if not clipped_face:
-                                continue
-                            clipped_face_tv = [
-                                (x / invz, y / invz, 1.0 / invz)
-                                for x, y, invz in clipped_face
-                            ]
-                            faces_to_draw.append(
-                                (clipped_face_tv, mtl, distance, portal_obj)
-                            )
-
-        elif shape["type"] == "Object3D":
-            transformed_vertexes = [[] * 3 for _ in range(len(shape["vertexes"]))]
-            for i, vertex in enumerate(shape["vertexes"]):
-                transformed_vertexes[i] = main_camera.transform_point(vertex)
-
-            for i, face in enumerate(shape["faces"]):
-                visible_face = _prepare_visible_face(transformed_vertexes, face)
-                if visible_face is not None:
-                    face_tv, mtl, distance = visible_face
-                    faces_to_draw.append((face_tv, mtl, distance, shape))
-
-        elif shape["type"] == "Plane3D":
-            transformed_vertexes = [[] * 3 for _ in range(len(shape["vertexes"]))]
-            for i, vertex in enumerate(shape["vertexes"]):
-                transformed_vertexes[i] = main_camera.transform_point(vertex)
-
-            visible_face = _prepare_visible_face(
-                transformed_vertexes,
-                (range(len(transformed_vertexes)), None),
-            )
-            if visible_face is not None:
-                face_tv, mtl, distance = visible_face
-                faces_to_draw.append((face_tv, mtl, distance, shape))
-
-        else:
-            print(f"unknown shape type {shape['type']}")
-
-    faces_to_draw.sort(key=itemgetter(2), reverse=True)
-
-    for vertexes, mtl, _, shape in faces_to_draw:
-        projected_points = []
-        for transformed in vertexes:
-            cz = transformed[2]
-            if cz <= 0:
-                break
-            screen_x = (transformed[0] / cz) * 300
-            screen_y = (transformed[1] / cz) * 300
-            projected_points.append((screen_x, screen_y))
-        else:
-            fill_color = scene_colors.get(mtl, (1, 1, 1))
-            outline_color = shape["outline"]
-            turtle.penup()
-            turtle.goto(projected_points[-1])
-            if shape["fill"]:
-                turtle.fillcolor(fill_color)
-                turtle.pencolor(fill_color if outline_color is None else outline_color)
-                turtle.begin_fill()
-            elif outline_color is not None:
-                turtle.pencolor(outline_color)
-
-            turtle.pendown()
-            for p in projected_points:
-                turtle.goto(p)
-            turtle.goto(projected_points[0])
-
-            if shape["fill"]:
-                turtle.end_fill()
-            turtle.penup()
+    for projected_points, mtl, _, shape in faces_to_draw:
+        screen_points = [(x * 300, y * 300) for x, y in projected_points]
+        fill_color = scene_colors.get(mtl, (1, 1, 1))
+        outline_color = shape["outline"]
+        turtle.penup()
+        turtle.goto(screen_points[-1])
+        if shape["fill"]:
+            turtle.fillcolor(fill_color)
+            turtle.pencolor(fill_color if outline_color is None else outline_color)
+            turtle.begin_fill()
+        elif outline_color is not None:
+            turtle.pencolor(outline_color)
+        turtle.pendown()
+        for point in screen_points:
+            turtle.goto(point)
+        turtle.goto(screen_points[0])
+        if shape["fill"]:
+            turtle.end_fill()
+        turtle.penup()
 
     turtle.update()
-
     while (time.monotonic() - start_time) <= (1 / 60):
         pass
