@@ -44,6 +44,42 @@ def dot(a, b):
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
+def normalize(v):
+    length = math.sqrt(dot(v, v))
+    if length == 0:
+        return [0, 0, 0]
+    return [v[i] / length for i in range(3)]
+
+
+def perpendicular_to(v):
+    if v[0] == 0 and v[1] == 0:
+        return [1, 0, 0]
+    return [-v[1], v[0], 0]
+
+
+def rodrigues(v, axis, angle):
+    c, s = math.cos(angle), math.sin(angle)
+    return [
+        v[i] * c + cross(axis, v)[i] * s + axis[i] * dot(axis, v) * (1 - c)
+        for i in range(3)
+    ]
+
+
+def rotate_vector_from_to(v, n1, n2):
+    n1 = normalize(n1)
+    n2 = normalize(n2)
+
+    if math.isclose(dot(n1, n2), 1.0):
+        return v
+    if math.isclose(dot(n1, n2), -1.0):
+        perp = perpendicular_to(n1)
+        return rodrigues(v, perp, math.pi)
+
+    axis = normalize(cross(n1, n2))
+    angle = math.acos(dot(n1, n2))
+    return rodrigues(v, axis, angle)
+
+
 def _is_inside(self, p1, p2, q):
     R = (p2[0] - p1[0]) * (q[1] - p1[1]) - (p2[1] - p1[1]) * (q[0] - p1[0])
     if R <= 0:
@@ -217,6 +253,49 @@ class DebugPoint3D:
 class PortalCouple:
     portal_a: Plane3D
     portal_b: Plane3D
+
+    def __post_init__(self):
+        triangle_a = self.portal_a._triangles[0]
+        triangle_b = self.portal_b._triangles[0]
+        self.edge_a1 = [triangle_a[1][i] - triangle_a[0][i] for i in range(3)]
+        self.edge_a2 = [triangle_a[2][i] - triangle_a[0][i] for i in range(3)]
+        self.edge_b1 = [triangle_b[1][i] - triangle_b[0][i] for i in range(3)]
+        self.edge_b2 = [triangle_b[2][i] - triangle_b[0][i] for i in range(3)]
+        length_a1 = math.sqrt(dot(self.edge_a1, self.edge_a1))
+        length_a2 = math.sqrt(dot(self.edge_a2, self.edge_a2))
+        length_b1 = math.sqrt(dot(self.edge_b1, self.edge_b1))
+        length_b2 = math.sqrt(dot(self.edge_b2, self.edge_b2))
+        if not (
+            math.isclose(length_a1, length_b1) and math.isclose(length_a2, length_b2)
+        ):
+            raise ValueError("The two portals must be congruent.")
+
+        self.portal_a_normal = cross(self.edge_a1, self.edge_a2)
+        self.portal_b_normal = cross(self.edge_b1, self.edge_b2)
+        self.portal_a_orig = [
+            sum(v[i] for v in self.portal_a.vertexes) / len(self.portal_a.vertexes)
+            for i in range(3)
+        ]
+        self.portal_b_orig = [
+            sum(v[i] for v in self.portal_b.vertexes) / len(self.portal_b.vertexes)
+            for i in range(3)
+        ]
+
+    def translate_point_through_both(self, point):
+        local_a = [point[i] - self.portal_a_orig[i] for i in range(3)]
+        rotated_a = rotate_vector_from_to(
+            local_a, self.portal_a_normal, self.portal_b_normal
+        )
+
+        local_b = [point[i] - self.portal_b_orig[i] for i in range(3)]
+        rotated_b = rotate_vector_from_to(
+            local_b, self.portal_b_normal, self.portal_a_normal
+        )
+
+        return (
+            [rotated_a[i] + self.portal_b_orig[i] for i in range(3)],
+            [rotated_b[i] + self.portal_a_orig[i] for i in range(3)],
+        )
 
 
 class Camera:
