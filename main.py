@@ -570,7 +570,7 @@ turtle.penup()
 turtle.hideturtle()
 turtle.speed(0)
 turtle.tracer(0)
-turtle.pensize(1)
+turtle.pensize(0)
 
 
 def _prepare_visible_face(transformed_vertexes, face, flip_winding=False):
@@ -724,6 +724,9 @@ def _render_scene(camera, recursion_depth, clip=None, distance_offset=0.0):
                 )
 
     if recursion_depth < MAX_PORTAL_RECURSION:
+        print(
+            f"Recursion depth: {recursion_depth}, visible portals: {len(visible_portals)}"
+        )
         for source, destination, portal_bounds, portal_distance in visible_portals:
             virtual_camera = _transform_camera_through_portal(
                 camera, _portal_data(source), _portal_data(destination)
@@ -773,3 +776,6 @@ while True:
     turtle.update()
     while (time.monotonic() - start_time) <= (1 / 60):
         pass
+
+    if keyboard.is_pressed("o"):
+        MAX_PORTAL_RECURSION = 10
