@@ -5,9 +5,6 @@ import mouse
 from dataclasses import dataclass, asdict as _asdict
 
 import turtle, time
-from operator import itemgetter
-
-from pprint import pprint
 
 # patches keyboard.is_pressed() to work on linux
 _check_output = __import__("subprocess", fromlist=["check_output"]).check_output
@@ -103,8 +100,40 @@ def _compute_intersection(a1, a2, b1, b2):
     return (x, y) + extra
 
 
+def _clean_polygon(polygon):
+    cleaned = []
+    for point in polygon:
+        if (
+            not cleaned
+            or math.hypot(point[0] - cleaned[-1][0], point[1] - cleaned[-1][1]) > 1e-10
+        ):
+            cleaned.append(point)
+
+    if (
+        len(cleaned) > 1
+        and math.hypot(cleaned[0][0] - cleaned[-1][0], cleaned[0][1] - cleaned[-1][1])
+        <= 1e-10
+    ):
+        cleaned.pop()
+
+    if len(cleaned) < 3:
+        return []
+
+    area = sum(
+        cleaned[i][0] * cleaned[(i + 1) % len(cleaned)][1]
+        - cleaned[(i + 1) % len(cleaned)][0] * cleaned[i][1]
+        for i in range(len(cleaned))
+    )
+    return cleaned if abs(area) > 1e-10 else []
+
+
 def clip_polygon(target, clipper):
     # sutherland-hodgman
+    target = _clean_polygon(target)
+    clipper = _clean_polygon(clipper)
+    if not target or not clipper:
+        return []
+
     clipper = clipper.copy()
     signed_area = sum(
         clipper[i][0] * clipper[(i + 1) % len(clipper)][1]
@@ -131,6 +160,9 @@ def clip_polygon(target, clipper):
             elif _is_inside(p1, p2, q1):
                 intersection_point = _compute_intersection(p1, p2, q1, q2)
                 final_polygon.append(intersection_point)
+        final_polygon = _clean_polygon(final_polygon)
+        if not final_polygon:
+            return []
     return final_polygon
 
 
@@ -413,6 +445,13 @@ class Camera:
 
         self.position[2] += self.velocity[2]
 
+        if keyboard.is_pressed("r"):
+            self.velocity = [0, 0, 0]
+        if keyboard.is_pressed("t"):
+            self.rotation = [0, 0]
+        if keyboard.is_pressed("y"):
+            self.position = [round(coord) for coord in self.position]
+
     def transform_point(self, point):
         point_x, point_y, point_z = point
         cam_x, cam_y, cam_z = self.position
@@ -479,10 +518,44 @@ Portal1B = Plane3D(
 Portal1 = PortalCouple(name="Portal1", portal_a=Portal1A, portal_b=Portal1B)
 Portal1.add_object_to_portal(Cube)
 
+_portal_vert2 = [i[-1:] + i[:-1] for i in _portal_vert]
+Portal2A = Plane3D(
+    name="Portal 2A",
+    fill=False,
+    outline="green",
+    vertexes=[[x - 80, y, z] for x, y, z in _portal_vert2][::-1],
+)
+Portal2B = Plane3D(
+    name="Portal 2B",
+    fill=False,
+    outline="yellow",
+    vertexes=[[x, y, z] for x, y, z in _portal_vert2],
+)
+Portal2 = PortalCouple(name="Portal2", portal_a=Portal2A, portal_b=Portal2B)
+Portal2.add_object_to_portal(Cube)
+
+_portal_vert3 = [i[-1:] + i[:-1] for i in _portal_vert2]
+Portal3A = Plane3D(
+    name="Portal 3A",
+    fill=False,
+    outline="purple",
+    vertexes=[[x, y - 80, z] for x, y, z in _portal_vert3][::-1],
+)
+Portal3B = Plane3D(
+    name="Portal 3B",
+    fill=False,
+    outline="orange",
+    vertexes=[[x, y, z] for x, y, z in _portal_vert3],
+)
+Portal3 = PortalCouple(name="Portal3", portal_a=Portal3A, portal_b=Portal3B)
+Portal3.add_object_to_portal(Cube)
+
 
 scene = [
     Cube.to_dict(),
     Portal1.to_dict(),
+    Portal2.to_dict(),
+    Portal3.to_dict(),
 ]
 scene_colors = {
     "Material.001": (1, 0, 0),
@@ -523,7 +596,7 @@ def _prepare_visible_face(transformed_vertexes, face, flip_winding=False):
     return face_tv, mtl, distance
 
 
-MAX_PORTAL_RECURSION = 50
+MAX_PORTAL_RECURSION = 3
 
 
 def _portal_data(portal):
@@ -668,6 +741,7 @@ def _render_scene(camera, recursion_depth, clip=None, distance_offset=0.0):
 
 while True:
     start_time = time.monotonic()
+    turtle.penup()
     turtle.clear()
     main_camera.update()
     faces_to_draw = _render_scene(main_camera, 0)
@@ -679,16 +753,19 @@ while True:
         outline_color = shape["outline"]
         turtle.penup()
         turtle.goto(screen_points[-1])
+
         if shape["fill"]:
             turtle.fillcolor(fill_color)
             turtle.pencolor(fill_color if outline_color is None else outline_color)
             turtle.begin_fill()
         elif outline_color is not None:
             turtle.pencolor(outline_color)
+
         turtle.pendown()
         for point in screen_points:
             turtle.goto(point)
         turtle.goto(screen_points[0])
+
         if shape["fill"]:
             turtle.end_fill()
         turtle.penup()
