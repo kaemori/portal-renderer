@@ -167,7 +167,6 @@ def clip_polygon(target, clipper):
 
 
 def clip_face_near(face_tv, near):
-    """Clip a camera-space polygon against the plane z = near (keeps z >= near)."""
     clipped = []
     n = len(face_tv)
     for i in range(n):
@@ -636,7 +635,7 @@ turtle.tracer(0)
 turtle.pensize(0)
 
 
-MAX_PORTAL_RECURSION = 2
+MAX_PORTAL_RECURSION = 0
 
 
 def _portal_data(portal):
@@ -808,8 +807,18 @@ while True:
     faces_to_draw.sort(key=lambda face: -face[2])
 
     paint_time = time.monotonic()
+    window_width, window_height = turtle.window_width(), turtle.window_height()
+    window_bounds = [
+        (-window_width / 2, -window_height / 2),
+        (window_width / 2, -window_height / 2),
+        (window_width / 2, window_height / 2),
+        (-window_width / 2, window_height / 2),
+    ]
     for projected_points, mtl, _, shape in faces_to_draw:
         screen_points = [(x * 300, y * 300) for x, y in projected_points]
+        screen_points = clip_polygon(screen_points, window_bounds)
+        if not screen_points:
+            continue
         fill_color = scene_colors.get(mtl, (1, 1, 1))
         outline_color = shape["outline"]
         turtle.penup()
